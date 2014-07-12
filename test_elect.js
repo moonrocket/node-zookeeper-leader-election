@@ -1,4 +1,4 @@
-var Elect = require('../services/elect/jigzelect'); 
+var Elect = require('.jigzelect'); 
 
 var debug = require('debug')('testelect'); 
 
