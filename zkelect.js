@@ -5,12 +5,12 @@ var EventEmitter 	= require('events').EventEmitter;
 var ZooKeeper 		= require('node-zookeeper-client'); 
 var NodeCache 		= require('node-cache'); 
 
-var debug 		= require('debug')('jigzelect'); 
+var debug 		= require('debug')('zkelect'); 
 
-var ZNODE_ELECT = "/jighost_elect";  	// default node if not provided in conf
+var ZNODE_ELECT = "/election";  	// default node if not provided in conf
 var ELECT_VERSION = "1";  
-var MAX_PER_OBJECT = 5; 
-var ZNAME  = "jigcandidate_";
+var MAX_PER_OBJECT = 10; 
+var ZNAME  = "ZKCandidate_";
 
 var CACHE_STD_TTL = 0; 
 var CACHE_CHECK_PERIOD = 0;  
@@ -20,17 +20,25 @@ var KEY_MAX_TENANTS = "_max_tenants";
 
 var KEY_PREFIX_WATCH = "_watch_";
 
-var Jigzelect = function(conf, max) {
+var ZKElect = function(conf, max) {
 
 	// conf
-	this.conf = conf; 
+	if (conf) this.conf = conf; 
+	else this.conf = {
+		zk_uri : 'localhost:2181'
+		, zk_timeout: 20000
+		, zk_spindelay: 1000
+		, zk_retries: 0
+		, cache_ttl : CACHE_STD_TTL
+		, cache_checkperiod: CACHE_CHECK_PERIOD
+		};
 
 	// cache
 	var ttl = this.conf.cache_ttl || CACHE_STD_TTL ; 
 	var period = this.conf.cache_checkperiod || CACHE_CHECK_PERIOD; 
 	this.cache = new NodeCache({stdTTL:ttl, checkperiod: period}); 
 
-	this.max_tenants = max; 
+	this.max_tenants = max || MAX_PER_OBJECT; 
 	this.cache.set(KEY_MAX_TENANTS, this.max_tenants); 
 	this.current_num_tenants = 0;
 	this.cache.set(KEY_NUM_CURRENT_TENANTS, this.current_num_tenants);  
@@ -89,11 +97,11 @@ var Jigzelect = function(conf, max) {
 	
 	function handleWatchEvent(e) {
 		debug("got event= %s", e); 
-                if (e.type == ZooKeeper.Event.TYPES.NODE_DELETED) { 
+                if (e.type == ZooKeeper.Event.NODE_DELETED) { 
 			debug ('received a deleted event %e', e); 
-		} else if (e.type == ZooKeeper.Event.TYPES.NODE_CREATED) {
+		} else if (e.type == ZooKeeper.Event.NODE_CREATED) {
 			debug ('received a created event %e', e); 
-		} else if (e.type == ZooKeeper.Event.TYPES.CHILDREN_CHANGED) {
+		} else if (e.type == ZooKeeper.Event.CHILDREN_CHANGED) {
 			debug('received a children changed event %e', e); 		
 		}
 	}
@@ -102,7 +110,7 @@ var Jigzelect = function(conf, max) {
 
 }
 
-util.inherits(Jigzelect, EventEmitter); 
+util.inherits(ZKElect, EventEmitter); 
 
 
 /*
@@ -112,7 +120,7 @@ util.inherits(Jigzelect, EventEmitter);
 */
 
 
-Jigzelect.prototype.addElectObject = function (key, zoo_path, max, cb) {
+ZKElect.prototype.addElectObject = function (key, zoo_path, max, cb) {
 	var self = this; 
 	this.zookeeper.exists(this.elect_path+'/'+key, function(error, stat) {
 		if (error) { debug(error.stack) ; return cb(error);  } 
@@ -134,7 +142,7 @@ Jigzelect.prototype.addElectObject = function (key, zoo_path, max, cb) {
 	});  
 };
 
-Jigzelect.prototype.getElectObject = function (key, cb) {
+ZKElect.prototype.getElectObject = function (key, cb) {
 	var self = this; 
 	this.zookeeper.getData(this.elect_path+'/'+key,
 		null, 
@@ -151,7 +159,7 @@ Jigzelect.prototype.getElectObject = function (key, cb) {
 	);
 }
 
-Jigzelect.prototype.delElectObject = function (key, cb) {
+ZKElect.prototype.delElectObject = function (key, cb) {
 	var self = this; 
 	this.zookeeper.remove(this.elect_path+'/'+key, -1, function (error) {
 		if (error) { debug (error.stack); return cb(error) ; }
@@ -160,7 +168,7 @@ Jigzelect.prototype.delElectObject = function (key, cb) {
 	}); 
 };
 
-Jigzelect.prototype.getElectObjects = function (cb) {
+ZKElect.prototype.getElectObjects = function (cb) {
 	var self = this; 
 	// list and watch childrens
 	this.zookeeper.getChildren( this.elect_path, 
@@ -174,7 +182,7 @@ Jigzelect.prototype.getElectObjects = function (cb) {
 };
 
 
-Jigzelect.prototype.anyCandidate = function () {
+ZKElect.prototype.anyCandidate = function () {
 
         var self = this;
         // list and watch childrens
@@ -209,10 +217,6 @@ Jigzelect.prototype.anyCandidate = function () {
 					var child = children[i];
 					self.candidate(child); 
 				}
-                        // if previously handled jigzcontext is no more, we shall remove it and notify 
-			//children.forEach(function(child){
-			//	self.children = children;
-			//}); 
                 }
         );
 
@@ -240,7 +244,7 @@ Jigzelect.prototype.anyCandidate = function () {
 	
 };
 
-Jigzelect.prototype.candidate = function(key) {
+ZKElect.prototype.candidate = function(key) {
         var self = this; 
 
 	// check ... if we already candidated for this key, no need to candidate again 
@@ -283,7 +287,7 @@ Jigzelect.prototype.candidate = function(key) {
 	}
 };
 
-Jigzelect.prototype.assessLeader = function (key, mypath) {
+ZKElect.prototype.assessLeader = function (key, mypath) {
 
 	var that = this; 
 
@@ -399,7 +403,7 @@ Jigzelect.prototype.assessLeader = function (key, mypath) {
 /*
 	Revoke an existing candidate
 */
-Jigzelect.prototype.revokeCandidate = function (key, cb) {
+ZKElect.prototype.revokeCandidate = function (key, cb) {
 	if (this.children.hasOwnProperty(key)) {
 		var self = this; 
 		var path = this.children[key].path; 
@@ -424,7 +428,7 @@ Jigzelect.prototype.revokeCandidate = function (key, cb) {
 
 
 /* purge data ... use with caution */
-Jigzelect.prototype.purge = function (key, cb) {
+ZKElect.prototype.purge = function (key, cb) {
 	this.cache.flushAll(); 	
 	this.current_num_tenants = 0; 
 	this.children = {}; 
@@ -433,14 +437,14 @@ Jigzelect.prototype.purge = function (key, cb) {
 /*
 	Set the maximum number of tenants the libraries will be leading
 */
-Jigzelect.prototype.setMaxTenants = function (max) {
+ZKElect.prototype.setMaxTenants = function (max) {
 	this.max_tenants = max; 
 };
 
 /*
 	return an Array list of objects for which we are the leader  
 */
-Jigzelect.prototype.getMyLeaders = function(cb){
+ZKElect.prototype.getMyLeaders = function(cb){
 	var leaders = [];
 	var keys = Object.keys(this.children); 
 	for (var i=0; i<keys.length; i++){
@@ -454,7 +458,7 @@ Jigzelect.prototype.getMyLeaders = function(cb){
 /*
 constraints: sync (i.e. return without cb) may not return the exact number. But normally the decay shall not happen, that s just a additional security 
 */
-Jigzelect.prototype.getNumberOfLeads = function(cb){
+ZKElect.prototype.getNumberOfLeads = function(cb){
 
 	var num = this.current_num_tenants;
 
@@ -469,5 +473,5 @@ Jigzelect.prototype.getNumberOfLeads = function(cb){
 	if (!cb) return num;  
 }
 
-module.exports = Jigzelect; 
+module.exports = ZKElect; 
 

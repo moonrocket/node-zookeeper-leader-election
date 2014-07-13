@@ -1,4 +1,4 @@
-var Elect = require('.jigzelect'); 
+var Elect = require('./zkelect'); 
 
 var debug = require('debug')('testelect'); 
 
@@ -7,7 +7,7 @@ var conf = {
 	, zk_timeout: 2000
 	, zk_spindelay: 1000
 	, zk_retries: 0 
-//	, zk_path_elect: '/jigelect'
+	, zk_path_elect: '/election'
 //	, cache_ttl : 0
 //	, cache_checkperiod: 0
 }
@@ -16,7 +16,7 @@ var elect = new Elect(conf, 5);
 
 for (var i=0; i< 3 ; i++) {
 	var ctxname = 'ctx_'+i; 
-	elect.addElectObject(ctxname, '/jigzones/jigcontexts/'+ctxname, 3, function(err, res) {
+	elect.addElectObject(ctxname, '/election/'+ctxname, 3, function(err, res) {
 		if (err) console.log("add election object error: %s", err); 
 		debug('added election object:%s', res); 
 	}); 
